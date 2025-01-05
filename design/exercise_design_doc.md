@@ -87,11 +87,10 @@ pub fn list_process_ids(&self) -> Vec<u64>
 | start_process | Creates a new worker and calls its start method passing the given command string. Retains the worker in its internal HashMap. Returns the worker id from the worker start command. |
 | stop_process | Locate the worker with the given id and call its stop method. Returns the result of the worker stop command. This will also remove the worker from the pool |
 | query_process_status | Get the status of the worker based on the provided worker id. Returns the string result of calling the worker get_status_string method.
-| get_process_output_stream | Returns a read buffer for use by users to get streamed output from the given process. 
+| get_process_output_stream | Returns a string representing the entirety of output to date from the process. |
 | list_process_ids | Returns a vector of currently encapsulated workers. |
 
-> NOTES: May want to allow a worker to be restarted? Do we remove a worker from the HashMap when its been stopped or has ended. May need to watch for the process to end on its own using something like [this](https://devblogs.microsoft.com/oldnewthing/20130405-00/?p=4743), though it is unclear if the API is available in the windows crate.
-> 
+All API's that take a process id will error if that process id cannot be found, likely due to stop being called.
 
 ### 3.2 gRPC General
 

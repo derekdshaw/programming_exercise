@@ -192,10 +192,9 @@ It is possible to set environment variables for resource limits.
 
 ## 5 TLSm Certificates and Authentication
 
-> Note: These certs did not work. Error returned when trying to connect to server was
-> `Error: tonic::transport::Error(Transport, ConnectError(Custom { kind: InvalidData, error: InvalidCertificate(NotValidForName) }))`
+Certs will be stored and retieved locally for simplicity. Having their paths hardcoded relative to the exe. This is not production quality as hard coding values like this is usually a no go.
 
-Certs will be stored and retieved locally for simplicity. Having their paths hardcoded relative to the exe. If a config system is implemented their paths could be placed in the config. 
+> Note for testing it may be required to move these to environment variables. Or, setup a config that could be used. With one for production and others for testing. Providing different certs for testing purposes.
 
 #### Install OpenSSL for Windows
 
@@ -204,35 +203,42 @@ The installers can be found [here](https://slproweb.com/products/Win32OpenSSL.ht
 #### Set the location of the cfg file
 `set OPENSSL_CONF=C:\Program Files\OpenSSL-Win64\bin\openssl.cfg`
 
-#### Generate the Certificate Authority key file
-`openssl genrsa -out ca.key 2048`
+#### Create a localhost.ext file with the following:
+```txt
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = localhost
+```
 
-#### Generate the Certificate Authority pem file.
-`openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 -out ca.pem -subj "/CN=TeleportApi"`
-- For now use a long lifespan for the cert
+#### Generate the Certificate Authority key and crt file
+`openssl req -x509 -sha256 -nodes -subj "/C=FI/CN=derekdshaw" -days 1825 -newkey rsa:2048 -keyout ca.key -out ca.crt`
 
-#### Generat the server key file
-`openssl genrsa -out server.key 2048`
-
-#### Generate the server csr file for use in creating the server.pem file
-`openssl req -new -key server.key -out server.csr -subj "/CN=localhost"`
+#### Generat the server key and csr file
+`openssl req -newkey rsa:2048 -nodes -subj "/C=FI/CN=derekdshaw" -keyout server_key.pem -out server_key.csr`
 
 #### Generate the server pem file
-`openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -out server.pem -days 365 -sha256`
+`openssl x509 -signkey server_key.pem -in server_key.csr -req -days 365 -out server_cert.pem`
 
-####Generat the client key file
-`openssl genrsa -out client.key 2048`
+#### Sign the server cert with the ca and the localhost.ext file
+`x509 -req -CA ca.crt -CAkey ca.key -in server_key.csr -out server_cert.pem -days 365 -CAcreateserial -extfile lo
+calhost.ext`
 
-#### Generate the client csr for use in creating the client pem file.
-`openssl req -new -key client.key -out client.csr -subj "/CN=localhost"`
+#### Generate the client key file and csr
+`openssl req -newkey rsa:2048 -nodes -subj "/C=FI/CN=derekdshaw" -keyout client_key.pem -out client_key.csr`
 
-#### Generate the client pem file
-`openssl x509 -req -in client.csr -signkey client.key -out client.pem -days 365 -sha256`
+#### Generate the client cert pem file
+`openssl req x509 -signkey client_key.pem -in client_key.csr -req -days 365 -out client_cert.pem`
 
-#### Generate the client ca pem file
-`openssl x509 -req -in client.csr -CA ca.pem -CAkey ca.key -CAcreateserial -out client_ca.pem -days 365 -sha256`
+#### Sign the client_cert with the CA and the localhost.ext file
+`openssl x509 -req -CA ca.crt -CAkey ca.key -in client_key.csr -out client_cert.pem -days 365 -CAcreateserial -extfile lo
+calhost.ext`
 
-- Unclear if this is really needed. There are other samples where this is not used.
+#### Intall the ca.crt file into the Trusted Root Certification Authorities store
+- Double click the ca.crt file in file explorer
+- Click the Install Certificate button
+- Manually place the certificate into Trusted Root Certification Authorities store
 
 TLS will be configures through `tonic` using the `tls_config` method on the `builder` for the Server and the same method on the `channel` object for the client.
 
@@ -246,4 +252,4 @@ Testing of the CLI/gRPC client will require a mock server. Postive and Negative 
 
 Functional testing will also be done by hand.
 
-> NOTE Testing may require a test application that can take a timeout interval and outputs information until the timeout completes.For now process commands will use a set of ping statements. These take time to execute and can be set using the -n argument to send multiple ping requests.
+> NOTE Testing may require a test application that can take a timeout interval and outputs information until the timeout completes. It could also do things like grab memory, eat CPU, etc. For now process commands will use a set of ping statements. These take time to execute and can be set using the -n argument to send multiple ping requests.

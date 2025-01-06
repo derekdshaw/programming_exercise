@@ -222,8 +222,7 @@ DNS.1 = localhost
 `openssl x509 -signkey server_key.pem -in server_key.csr -req -days 365 -out server_cert.pem`
 
 #### Sign the server cert with the ca and the localhost.ext file
-`x509 -req -CA ca.crt -CAkey ca.key -in server_key.csr -out server_cert.pem -days 365 -CAcreateserial -extfile lo
-calhost.ext`
+`x509 -req -CA ca.crt -CAkey ca.key -in server_key.csr -out server_cert.pem -days 365 -CAcreateserial -extfile localhost.ext`
 
 #### Generate the client key file and csr
 `openssl req -newkey rsa:2048 -nodes -subj "/C=FI/CN=derekdshaw" -keyout client_key.pem -out client_key.csr`
@@ -232,8 +231,7 @@ calhost.ext`
 `openssl req x509 -signkey client_key.pem -in client_key.csr -req -days 365 -out client_cert.pem`
 
 #### Sign the client_cert with the CA and the localhost.ext file
-`openssl x509 -req -CA ca.crt -CAkey ca.key -in client_key.csr -out client_cert.pem -days 365 -CAcreateserial -extfile lo
-calhost.ext`
+`openssl x509 -req -CA ca.crt -CAkey ca.key -in client_key.csr -out client_cert.pem -days 365 -CAcreateserial -extfile localhost.ext`
 
 #### Intall the ca.crt file into the Trusted Root Certification Authorities store
 - Double click the ca.crt file in file explorer

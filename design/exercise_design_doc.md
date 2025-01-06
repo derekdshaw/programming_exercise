@@ -43,9 +43,9 @@ pub enum WorkerStatus {
 It will have the following public interface.
 
 ```rust
-pub fn start(&mut self, command: &str) -> Result<u64>
+pub fn start(&mut self, command: &str, cpu_limit: Option<u32>, memory_limit: Option<u64>, io_limit: Option<u64>) -> Result<u64>
 pub fn stop(&mut self) -> Result<()>
-pub fn get_output_slice(&mut self) -> Result<String> // this will change.
+pub fn get_output_buf(&mut self) -> Result<String> // could name this simply "output"
 pub fn get_status_string(&self) -> String
 pub fn get_status(&self) -> WorkerStatus
 pub fn get_id(&self) -> u64
@@ -53,21 +53,21 @@ pub fn wait(&mut self)
 ```
 | API | Description |
 | ---------- | ----------------------------------------------------------- |
-| start | Launches a process with the given command. The process can have various machine properties throttled using environment variables (see below). Returns the new worker id.
+| start | Launches a process with the given command. The process can have various machine properties throttled using the parameters optionally passed in. Returns the new worker id.
 | stop | Given a process id and the process is still running, this command will stop the process and change its status to Stopped. Returns true or false if the process was succesfully stopped.|
-| output | |
+| get_output_buf | The returns a string containing all stdout so far from the process |
 | get_status_string | Returns the current WorkerStatus as a string. |
 | get_status | Returns the current WorkerStatus. |
 | get_id | Returns the internal worker id, generally used as the process id. |
-| wait | Wait for the specified process to complete. This is mainly used for testing. Though its made public as it might be usefule for users |
+| wait | Wait for the specified process to complete. This is mainly used for testing. Though its made public as it might be useful for users |
 
-When starting a new process it is possible to throttle various elements of the process by setting the following environment variables.
+When starting a new process it is possible to throttle various elements of the process by passing in the values to the `start` method. Support for this ability will be done using a windows Job Object attached to the process at the time of its creation. If these values are not provided the process will run at full capacity.
 
-| Env Variable | Usage |
-| ---------------- | ------------------------------------------------ |
-| PM_PROCESS_CPU_LIMIT | A number representing a percentage of CPU to throttle the process to. |
-| PM_PROCESS_MEMORY_LIMIT | A number in bytes to cap the processes use of memory to. 
-| PM_PROCESS_IO_LIMIT | A number in bytes to cap the IO usage of the process to.
+| Throttle | Description |
+| -------- | --------------------------------------------------------|
+| cpu_limit | A value from 1-100 inclusive representing the amount as a precentage to throttle the CPU. |
+| memory_limit | A value in bytes to limit the usage of the process to that amount of memory. |
+| io_limit | A value in bytes to limit the IO usage of the process, the same value will be used for IOPS and Max Bandwidth |
 
 > A  note about worker id. It is an auto generated number which grows for each process created using the start command. We "could" use the process id contained in the PROCESSINFORMATION windows struct, but this is simpler and easier for users to understand.
 
@@ -76,18 +76,18 @@ When starting a new process it is possible to throttle various elements of the p
 This is responsible for creating and managing a pool of worker objects. It will have the following public interface. The set of workers will be stored in a HashMap for simple retrieval based on worker id. 
 
 ```rust
-pub fn start_process(&mut self, command_line: &str) -> Result<(u64)>
+pub fn start_process(&mut self, command_line: &str, cpu_limit: Option<u32>, memory_limit: Option<u64>, io_limit: Option<u64>) -> Result<(u64)>
 pub fn stop_process(&mut self, process_id: u64) -> Result<bool>
 pub fn query_process_status(&self, process_id: u64) -> String
-pub fn get_process_output_stream(&mut self, process_id: u64) -> Result<String>
+pub fn get_process_output(&mut self, process_id: u64) -> Result<String>
 pub fn list_process_ids(&self) -> Vec<u64>
 ```
 | API | Description |
 | ---------- | ----------------------------------------------------------- |
-| start_process | Creates a new worker and calls its start method passing the given command string. Retains the worker in its internal HashMap. Returns the worker id from the worker start command. |
+| start_process | Creates a new worker and calls its start method passing the given command string. Retains the worker in its internal HashMap. It takes a set of optional parameters to limit resource usage. See details in the `Worker` section above. Returns the worker id from the worker start command. |
 | stop_process | Locate the worker with the given id and call its stop method. Returns the result of the worker stop command. This will also remove the worker from the pool |
 | query_process_status | Get the status of the worker based on the provided worker id. Returns the string result of calling the worker get_status_string method.
-| get_process_output_stream | Returns a string representing the entirety of output to date from the process. |
+| get_process_output | Returns a string representing the entirety of output to date from the process. |
 | list_process_ids | Returns a vector of currently encapsulated workers. |
 
 All API's that take a process id will error if that process id cannot be found, likely due to stop being called.
@@ -97,8 +97,11 @@ All API's that take a process id will error if that process id cannot be found, 
 The gRPC service will be defined by the following protobuf outline. A protobuf compiler will need to be present when building this codebase. It should have its path defined under the PROTOC environment variable. The compiler can be found [here](https://github.com/protocolbuffers/protobuf/releases). 
 
 ```
-message Command {
+message StartCommand {
   string command = 1;
+  optional uint32 cpu_limit = 2;
+  optional uint64 memory_limit = 3;
+  optional uint64 io_limit = 4;
 }
 
 message StartedProcess {
@@ -126,7 +129,7 @@ message ProcessStatus {
 }
 
 service ProcessApiService {
-  rpc Start (Command) returns (StartedProcess);
+  rpc Start (StartCommand) returns (StartedProcess);
   rpc Stop (ProcessId) returns (StoppedProcess);
   rpc List (google.protobuf.Empty) returns (ProcessList);
   rpc Status(ProcessId) returns (ProcessStatus);
@@ -141,7 +144,7 @@ A gRPC server that uses TLSm for authentication. It supports the following API. 
 > The connection port will be hard coded for now. 
 
 ```rust
-async fn start(&self, request: Request<Command>) -> Result<Response<StartedProcess>, Status>
+async fn start(&self, request: Request<StartCommand>) -> Result<Response<StartedProcess>, Status>
 async fn stop(&self, request: Request<ProcessId>) -> Result<Response<StoppedProcess>, Status>
 async fn list(&self, _request: Request<()>) -> Result<Response<ProcessList>, Status>
 async fn status(&self, request: Request<ProcessId>) -> Result<Response<ProcessStatus>, Status> 
@@ -162,9 +165,18 @@ A CLI that connects to the gRPC server. It will have the following interface.
 
 Internally it will then make the calls to the server for the given command. Outputing any response as required.
 
-While the other commands will end after completion. The output command continues until the process ends or the user aborts the CLI command. This is due to the streaming nature of the command.
+For the `output` command the client will keep track of how much of the output it has written and only output the new content. While the other commands will end after completion. The `output` command continues until the process ends or the user aborts the CLI command. This is due to the streaming nature of the command. The communication between the client and server are streaming for this command. 
 
-> NOTE Most likely need to support multiple instances of the CLI as should be usable if an instance is running Output.
+Mutiple client connections to the server will be supported.
+
+It is possible to set environment variables for resource limits.
+| Env Variable | Usage |
+| ---------------- | ------------------------------------------------ |
+| PM_PROCESS_CPU_LIMIT | A number representing a percentage of CPU to throttle the process to. |
+| PM_PROCESS_MEMORY_LIMIT | A number in bytes to cap the processes use of memory to. 
+| PM_PROCESS_IO_LIMIT | A number in bytes to cap the IO usage of the process to.
+
+> Note that these could easily be moved to the command line for the CLI start command as optional parameters.
 
 ## 4 Crates
 
@@ -212,7 +224,7 @@ The installers can be found [here](https://slproweb.com/products/Win32OpenSSL.ht
 `openssl genrsa -out client.key 2048`
 
 #### Generate the client csr for use in creating the client pem file.
-`openssl req -new -key client.key -out client.csr -subj "/CN=client"`
+`openssl req -new -key client.key -out client.csr -subj "/CN=localhost"`
 
 #### Generate the client pem file
 `openssl x509 -req -in client.csr -signkey client.key -out client.pem -days 365 -sha256`

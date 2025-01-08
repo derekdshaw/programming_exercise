@@ -46,7 +46,6 @@ It will have the following public interface.
 pub fn start(&mut self, command: &str, cpu_limit: Option<u32>, memory_limit: Option<u64>, io_limit: Option<u64>) -> Result<u64>
 pub fn stop(&mut self) -> Result<()>
 pub fn get_output_buf(&mut self) -> Result<String> // could name this simply "output"
-pub fn get_status_string(&self) -> String
 pub fn get_status(&self) -> WorkerStatus
 pub fn get_id(&self) -> u64
 pub fn wait(&mut self)
@@ -56,8 +55,7 @@ pub fn wait(&mut self)
 | start | Launches a process with the given command. The process can have various machine properties throttled using the parameters optionally passed in. Returns the new worker id.
 | stop | Given a process id and the process is still running, this command will stop the process and change its status to Stopped. Returns true or false if the process was succesfully stopped.|
 | get_output_buf | The returns a string containing all stdout so far from the process |
-| get_status_string | Returns the current WorkerStatus as a string. |
-| get_status | Returns the current WorkerStatus. |
+| get_status | Returns the current WorkerStatus. This will support fmt::Display in order to get a string representation. |
 | get_id | Returns the internal worker id, generally used as the process id. |
 | wait | Wait for the specified process to complete. This is mainly used for testing. Though its made public as it might be useful for users |
 
@@ -155,12 +153,16 @@ async fn output(&self, request: Request<ProcessId>) -> Result<Response<Self::Out
 
 A CLI that connects to the gRPC server. It will have the following interface. 
 
+| Root Command | Arguments |
+| ----------------- | ----------------------------------------------- |
+| cert_path | <PATH TO CLIENT CERT>
+
 | Sub Command | Arguments |
 | ----------------- | ----------------------------------------------- |
-| start | -c COMMAND_STRING |
-| stop | -p PROCESS_ID |
-| status | -p PROCESS_ID |
-| output | -p PROCESS_ID |
+| start | -c COMMAND_STRING - Required|
+| stop | -p PROCESS_ID - Required|
+| status | -p PROCESS_ID - Required|
+| output | -p PROCESS_ID - Required|
 | list | _none_ |
 
 Internally it will then make the calls to the server for the given command. Outputing any response as required.
@@ -189,12 +191,15 @@ It is possible to set environment variables for resource limits.
 | prost | Required for tonic protobuf support. |
 | anyhow | Ease of use for returning Results. |
 | clap | Used for command line processing in the cli |
+| x509-parser | Used to parse out the policies of the client cert for authorization |
 
-## 5 TLSm Certificates and Authentication
+## 5 TLSm Certificates
 
 Certs will be stored and retieved locally for simplicity. Having their paths hardcoded relative to the exe. This is not production quality as hard coding values like this is usually a no go.
 
-> Note for testing it may be required to move these to environment variables. Or, setup a config that could be used. With one for production and others for testing. Providing different certs for testing purposes.
+> Note for testing it may be required to move these to environment variables. Or, setup a config that could be used. With one for production and others for testing. Providing different certs for testing purposes within differnt configs.
+
+Below is documented the process to get openssl certs for windows. This is done for completness. 
 
 #### Install OpenSSL for Windows
 
@@ -203,7 +208,13 @@ The installers can be found [here](https://slproweb.com/products/Win32OpenSSL.ht
 #### Set the location of the cfg file
 `set OPENSSL_CONF=C:\Program Files\OpenSSL-Win64\bin\openssl.cfg`
 
-#### Create a localhost.ext file with the following:
+#### Set the openssl crate env vars
+
+- `set OPENSSL_DIR="C:\Program Files\OpenSSL-Win64"`
+- `set OPENSSL_INCLUDE_DIR="C:\Program Files\OpenSSL-Win64\include"`
+- `set OPENSSL_LIB_DIR="C:\Program Files\OpenSSL-Win64\lib\VC\x64\MD"`
+
+#### Create a ca.ext file with the following. 
 ```txt
 authorityKeyIdentifier=keyid,issuer
 basicConstraints=CA:FALSE
@@ -211,6 +222,24 @@ subjectAltName = @alt_names
 [alt_names]
 DNS.1 = localhost
 ```
+#### Create client.ext file with the following. This includes the Role needed for authorization to resources.
+```txt
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+subjectAltName = @alt_names
+certificatePolicies = @policies
+
+[alt_names]
+DNS.1 = localhost
+
+[policies]
+policyIdentifier = 1.2.3.4.5.6.7.8.1
+userNotice.1 = @role
+
+[role]
+explicitText = "Role: <ROLE>"
+```
+> ROLE is set to either `Executor` or `Reader`. See Authorization below for more details.
 
 #### Generate the Certificate Authority key and crt file
 `openssl req -x509 -sha256 -nodes -subj "/C=FI/CN=derekdshaw" -days 1825 -newkey rsa:2048 -keyout ca.key -out ca.crt`
@@ -221,8 +250,8 @@ DNS.1 = localhost
 #### Generate the server pem file
 `openssl x509 -signkey server_key.pem -in server_key.csr -req -days 365 -out server_cert.pem`
 
-#### Sign the server cert with the ca and the localhost.ext file
-`x509 -req -CA ca.crt -CAkey ca.key -in server_key.csr -out server_cert.pem -days 365 -CAcreateserial -extfile localhost.ext`
+#### Sign the server cert with the ca and the ca.ext file
+`x509 -req -CA ca.crt -CAkey ca.key -in server_key.csr -out server_cert.pem -days 365 -CAcreateserial -extfile ca.ext`
 
 #### Generate the client key file and csr
 `openssl req -newkey rsa:2048 -nodes -subj "/C=FI/CN=derekdshaw" -keyout client_key.pem -out client_key.csr`
@@ -230,8 +259,8 @@ DNS.1 = localhost
 #### Generate the client cert pem file
 `openssl req x509 -signkey client_key.pem -in client_key.csr -req -days 365 -out client_cert.pem`
 
-#### Sign the client_cert with the CA and the localhost.ext file
-`openssl x509 -req -CA ca.crt -CAkey ca.key -in client_key.csr -out client_cert.pem -days 365 -CAcreateserial -extfile localhost.ext`
+#### Sign the client_cert with the CA and the localhost.ext file. Do this twice, one for Executor and one for Read roles.
+`openssl x509 -req -CA ca.crt -CAkey ca.key -in client_key.csr -out client_cert.pem -days 365 -CAcreateserial -extfile client.ext`
 
 #### Intall the ca.crt file into the Trusted Root Certification Authorities store
 - Double click the ca.crt file in file explorer
@@ -240,6 +269,22 @@ DNS.1 = localhost
 
 TLS will be configures through `tonic` using the `tls_config` method on the `builder` for the Server and the same method on the `channel` object for the client.
 
+## Authorization
+
+We will stamp each client certificate with a ROLE located in a policy assigned to the cert during creation. The roles are:
+
+| Role | Description |
+| ---------- | ------------------------------------------------------------------- |
+| Executor | This role has full permissions for all actions. Start, Stop, List, Output and Status. |
+| Reader | This role only has permissions for the following: List, Output, Status. |
+
+The Role will be embedded into the client certificates as Policy under the key userNotice.1. The server will extract that information from the client certificate and authorize a given role based on the client certificate information. If the role is not valid the connection will be disallowed. 
+
+Once the server has determined if there is a Role to be applied during the authentication phase of the connection it will append the Role to the request passed to the commands such that they can then filter their execution based off of the Role supplied. 
+
+> Note that I am only implementing a single role at a time. Multiple roles could be implemented by adding other userNotices to be parsed by the server. Support for multiple roles at a time would have to be added.
+
+
 ## 6 Testing
 
 Testing will be done using the standard Rust test framework. Testing of the library will focus on testing the Worker object. Both possitive and negative testing. 
@@ -247,6 +292,10 @@ Testing will be done using the standard Rust test framework. Testing of the libr
 Testing the gRPC server requires a mock client. Postive and Negative testing will be done. 
 
 Testing of the CLI/gRPC client will require a mock server. Postive and Negative testing will be done.
+
+Testing of authorization can be done by switching the client certificates to allow for different scenarios to be tested.
+
+Testing of TLS can be done by using valid and invalid certs. 
 
 Functional testing will also be done by hand.
 

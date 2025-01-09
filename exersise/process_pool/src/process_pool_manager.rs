@@ -31,9 +31,8 @@ impl ProcessPoolManager {
         worker_mut.start(command_line, cpu_limit, memory_limit, io_limit)
     }
 
-    // Should this remove the worker from the pool.
     pub fn stop_process(&mut self, process_id: u64) -> Result<bool> {
-        // TODO test if the worker is in the pool and return an error if not
+        
         if self.pool.contains_key(&process_id) {
             let mut worker = self.pool.get_mut(&process_id).unwrap();
             match worker.stop() {

@@ -292,12 +292,6 @@ pub fn auth_interceptor(request: Request<()>) -> Result<Request<()>, Status> {
     Ok(request)
 }
 
-fn authorize_client(roles: &[String]) -> bool { 
-    // Implement your authorization logic here 
-    // For example, check if roles contain a specific role 
-    roles.contains(&"Executor".to_string()) 
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tls = get_tls_config()?;

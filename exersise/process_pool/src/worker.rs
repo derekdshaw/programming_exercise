@@ -271,14 +271,6 @@ impl Worker {
         Ok(())
     }
 
-    // pub fn get_status_string(&self) -> String {
-    //     // this would be a good place to check the validity of the process handle.
-    //     // And set the status to Stopped if the process has terminated.
-    //     let status = self.status.lock().unwrap();
-
-    //     format!("{}", *status)
-    // }
-
     pub fn get_status(&self) -> WorkerStatus {
         // this would be a good place to check the validity of the process handle.
         // And set the status to Stopped if the process has terminated.

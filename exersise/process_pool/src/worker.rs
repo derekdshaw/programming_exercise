@@ -114,7 +114,13 @@ impl Worker {
     }
 
     /// Start a process with the given command and return the process id
-    pub fn start(&mut self, command: &str, cpu_limit: Option<u32>, memory_limit: Option<u64>, io_limit: Option<u64>) -> Result<u64> {
+    pub fn start(
+        &mut self,
+        command: &str,
+        cpu_limit: Option<u32>,
+        memory_limit: Option<u64>,
+        io_limit: Option<u64>,
+    ) -> Result<u64> {
         unsafe {
             let sa_attr = SECURITY_ATTRIBUTES {
                 nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
@@ -126,8 +132,7 @@ impl Worker {
             let mut stdout_read = HANDLE::default();
             let mut stdout_write = HANDLE::default();
 
-            if let Err(e) = CreatePipe(&mut stdout_read, &mut stdout_write, Some(&sa_attr), 0)
-            {
+            if let Err(e) = CreatePipe(&mut stdout_read, &mut stdout_write, Some(&sa_attr), 0) {
                 eprintln!("Failed to create stdout pipe: {:?}", e);
                 self.set_status(WorkerStatus::FailedToStart);
                 return Err(e.into());
@@ -156,7 +161,7 @@ impl Worker {
             if cpu_limit.is_some() {
                 self.set_cpu_limit(&job, cpu_limit.unwrap())?;
             }
-            
+
             if memory_limit.is_some() {
                 self.set_memory_limit(&job, memory_limit.unwrap())?;
             }
@@ -263,7 +268,7 @@ impl Worker {
 
                 CloseHandle(self.pi.hProcess).expect("Unable to close process handle");
             }
-        } 
+        }
 
         // Either we stopped the process or its not running.
         self.set_status(WorkerStatus::Stopped);
@@ -300,14 +305,17 @@ impl Worker {
     }
 
     pub fn wait(&mut self) {
-        if self.get_status() == WorkerStatus::Running && self.is_process_running().unwrap() && !self.pi.hProcess.is_invalid() {
+        if self.get_status() == WorkerStatus::Running
+            && self.is_process_running().unwrap()
+            && !self.pi.hProcess.is_invalid()
+        {
             unsafe {
                 // Should use a reasonable timeout here. Perhaps from an environment variable.
                 WaitForSingleObject(self.pi.hProcess, INFINITE);
                 CloseHandle(self.pi.hProcess).expect("Unable to close process handle");
             }
         }
-        
+
         self.set_status(WorkerStatus::Stopped);
     }
 
@@ -350,8 +358,7 @@ impl Worker {
         unsafe {
             let mut job_info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
                 BasicLimitInformation: JOBOBJECT_BASIC_LIMIT_INFORMATION {
-                    LimitFlags: JOB_OBJECT_LIMIT_JOB_MEMORY
-                        | JOB_OBJECT_LIMIT_PROCESS_MEMORY,
+                    LimitFlags: JOB_OBJECT_LIMIT_JOB_MEMORY | JOB_OBJECT_LIMIT_PROCESS_MEMORY,
                     ..Default::default()
                 },
                 JobMemoryLimit: memory_limit as usize,
@@ -376,7 +383,6 @@ impl Worker {
     }
 
     fn set_io_limit(&mut self, job: &HANDLE, io_limit: u64) -> Result<()> {
-
         unsafe {
             let mut io_info = JOBOBJECT_IO_RATE_CONTROL_INFORMATION_NATIVE_V1 {
                 ControlFlags: JOB_OBJECT_IO_RATE_CONTROL_ENABLE, // We cant use this type to assign here JOB_OBJECT_IO_RATE_CONTROL_ENABLE;
@@ -385,11 +391,7 @@ impl Worker {
                 ..Default::default()
             };
             // Need to use this different api in order to set io limits.
-            if SetIoRateControlInformationJobObject(
-                *job,
-                &mut io_info as *mut _ as *mut _,
-            ) == 0
-            {
+            if SetIoRateControlInformationJobObject(*job, &mut io_info as *mut _ as *mut _) == 0 {
                 eprintln!(
                     "Failed to set io job object io information: {:?}",
                     GetLastError()
@@ -509,7 +511,7 @@ mod tests {
 
         thread::sleep(Duration::from_millis(200)); // Give time for new output
 
-        // Run this in a short loop to keep the time for the test to finish down. 
+        // Run this in a short loop to keep the time for the test to finish down.
         let mut max_len = 0;
         for _ in 0..2 {
             if w.is_process_running().unwrap() && !w.pi.hProcess.is_invalid() {
@@ -540,5 +542,4 @@ mod tests {
             }
         }
     }
-
 }

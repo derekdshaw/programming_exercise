@@ -1,4 +1,6 @@
 use anyhow::Result;
+use openssl::ssl::{SslAcceptor, SslFiletype, SslRef};
+use openssl::x509::{X509ReqRef, X509};
 use process_api_service::process_api_service_server::{ProcessApiService, ProcessApiServiceServer};
 use process_api_service::{
     OutputStreamResponse, ProcessId, ProcessList, ProcessStatus, StartCommand, StartedProcess,
@@ -8,52 +10,50 @@ use process_pool::process_pool_manager::ProcessPoolManager;
 use std::borrow::BorrowMut;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::{mpsc, Mutex}; // Must use tokio::sync::Mutex, not std::sync::Mutex because it supports Send and can be moved into a thread.
+use tokio_openssl::SslStream;
 use tokio_stream::wrappers::ReceiverStream;
+use tonic::service::Interceptor;
 use tonic::{
     transport::{Certificate, Identity, Server, ServerTlsConfig},
     Request, Response, Status,
 };
-use tonic::service::Interceptor; 
-use openssl::x509::{X509ReqRef, X509};
-use openssl::ssl::{SslAcceptor, SslFiletype, SslRef};
-use tokio_openssl::SslStream;
-use x509_parser::prelude::*;
 use x509_parser::extensions::ParsedExtension;
 use x509_parser::extensions::{PolicyInformation, PolicyQualifierInfo};
+use x509_parser::prelude::*;
 
 pub mod process_api_service {
     tonic::include_proto!("process_api_service"); // The string specified here must match the proto package name
 }
 
-/// Used to set a Role in the request after parsing the client cert. 
+/// Used to set a Role in the request after parsing the client cert.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Role(String);
 
-impl PartialEq<str> for Role { 
-    fn eq(&self, other: &str) -> bool { 
-        self.0 == other 
-    } 
-} 
+impl PartialEq<str> for Role {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
 
-impl PartialEq<&str> for Role { 
-    fn eq(&self, other: &&str) -> bool { 
-        self.0 == *other 
-    } 
+impl PartialEq<&str> for Role {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Roles {
     Executor,
-    Reader
+    Reader,
 }
 
-impl PartialEq<str> for Roles { 
-    fn eq(&self, other: &str) -> bool { 
-        match self { 
-            Roles::Executor => other == "Executor", 
-            Roles::Reader => other == "Reader", 
-        } 
-    } 
+impl PartialEq<str> for Roles {
+    fn eq(&self, other: &str) -> bool {
+        match self {
+            Roles::Executor => other == "Executor",
+            Roles::Reader => other == "Reader",
+        }
+    }
 }
 
 #[derive(Default)]
@@ -62,7 +62,6 @@ pub struct ProcessApiServiceImpl {
 }
 
 impl ProcessApiServiceImpl {
-
     /// # Safety
     /// This function is unsafe because it creates a new instance of ProcessPoolManager
     pub unsafe fn new() -> Self {
@@ -78,7 +77,6 @@ impl ProcessApiService for ProcessApiServiceImpl {
         &self,
         request: Request<StartCommand>,
     ) -> Result<Response<StartedProcess>, Status> {
-
         if can_run_command(&request, Roles::Executor) {
             let command = request.into_inner();
             let cmd_str = command.command.clone();
@@ -101,12 +99,13 @@ impl ProcessApiService for ProcessApiServiceImpl {
                 Err(e) => Err(Status::internal(e.to_string())),
             }
         } else {
-            Err(Status::unauthenticated("Unauthorized: Incorrect role for command"))
+            Err(Status::unauthenticated(
+                "Unauthorized: Incorrect role for command",
+            ))
         }
     }
 
     async fn stop(&self, request: Request<ProcessId>) -> Result<Response<StoppedProcess>, Status> {
-
         if can_run_command(&request, Roles::Executor) {
             let process_id = request.into_inner().id;
 
@@ -127,7 +126,9 @@ impl ProcessApiService for ProcessApiServiceImpl {
                 }
             }
         } else {
-            Err(Status::unauthenticated("Unauthorized: Incorrect role for command"))
+            Err(Status::unauthenticated(
+                "Unauthorized: Incorrect role for command",
+            ))
         }
     }
 
@@ -139,12 +140,13 @@ impl ProcessApiService for ProcessApiServiceImpl {
                 processes: process_list,
             }))
         } else {
-            Err(Status::unauthenticated("Unauthorized: Incorrect role for command"))
+            Err(Status::unauthenticated(
+                "Unauthorized: Incorrect role for command",
+            ))
         }
     }
 
     async fn status(&self, request: Request<ProcessId>) -> Result<Response<ProcessStatus>, Status> {
-
         if can_run_command(&request, Roles::Reader) {
             let process_id = request.into_inner().id;
 
@@ -154,15 +156,15 @@ impl ProcessApiService for ProcessApiServiceImpl {
                     let process_status = ProcessStatus {
                         status: status.to_string(),
                     };
-            
+
                     Ok(Response::new(process_status))
-                },
-                Err(e) => {
-                    Err(Status::internal(e.to_string()))
                 }
+                Err(e) => Err(Status::internal(e.to_string())),
             }
         } else {
-            Err(Status::unauthenticated("Unauthorized: Incorrect role for command"))
+            Err(Status::unauthenticated(
+                "Unauthorized: Incorrect role for command",
+            ))
         }
     }
 
@@ -172,7 +174,6 @@ impl ProcessApiService for ProcessApiServiceImpl {
         &self,
         request: Request<ProcessId>,
     ) -> Result<Response<Self::OutputStream>, Status> {
-
         if can_run_command(&request, Roles::Reader) {
             let pp = Arc::clone(&self.process_pool);
             let process_id = request.into_inner().id;
@@ -193,7 +194,8 @@ impl ProcessApiService for ProcessApiServiceImpl {
                                 .send(Ok(OutputStreamResponse {
                                     stdout: output_string[output_start..].to_string(),
                                 }))
-                                .await.is_err()
+                                .await
+                                .is_err()
                             {
                                 break;
                             }
@@ -209,9 +211,10 @@ impl ProcessApiService for ProcessApiServiceImpl {
 
             Ok(Response::new(ReceiverStream::new(rx)))
         } else {
-            Err(Status::unauthenticated("Unauthorized: Incorrect role for command"))
+            Err(Status::unauthenticated(
+                "Unauthorized: Incorrect role for command",
+            ))
         }
-
     }
 }
 
@@ -248,41 +251,45 @@ fn get_tls_config() -> Result<ServerTlsConfig, Box<dyn std::error::Error>> {
     Ok(tls)
 }
 
-pub fn auth_interceptor(request: Request<()>) -> Result<Request<()>, Status> { 
-   
+pub fn auth_interceptor(request: Request<()>) -> Result<Request<()>, Status> {
     static ROLE_LOOKUP: &str = "Role: ";
-    let certs = request.peer_certs().expect("Client did not send its certs!"); 
+    let certs = request
+        .peer_certs()
+        .expect("Client did not send its certs!");
 
-    for (i, cert) in certs.iter().enumerate() {  
+    for (i, cert) in certs.iter().enumerate() {
         let der_u8 = cert.to_vec();
         let x509_cert = X509Certificate::from_der(der_u8.as_slice());
         match x509_cert {
             Ok((_rem, cert)) => {
-                for ext in cert.extensions() { 
-                    if let ParsedExtension::CertificatePolicies(policy_info) = ext.parsed_extension() { 
+                for ext in cert.extensions() {
+                    if let ParsedExtension::CertificatePolicies(policy_info) =
+                        ext.parsed_extension()
+                    {
                         for policy in policy_info {
                             for policy_quals in &policy.policy_qualifiers {
                                 for policy_qualifier in policy_quals {
-                                    
                                     // look for a defined Role. If found add a Role to the request for later retrieval.
                                     let qualifier = policy_qualifier.qualifier;
-                                    let qual_str = String::from_utf8(qualifier.to_vec()).expect("Unable to parse qualifier");
+                                    let qual_str = String::from_utf8(qualifier.to_vec())
+                                        .expect("Unable to parse qualifier");
                                     match qual_str.find(ROLE_LOOKUP) {
                                         Some(role_index) => {
-                                            let role_str = &qual_str[role_index + ROLE_LOOKUP.len()..];
+                                            let role_str =
+                                                &qual_str[role_index + ROLE_LOOKUP.len()..];
                                             let role = Role(role_str.to_string());
                                             let mut req_mut = request;
                                             req_mut.extensions_mut().insert(role);
-                                            return Ok(req_mut)
-                                        },
-                                        None => {  } // role not found nothing to do
+                                            return Ok(req_mut);
+                                        }
+                                        None => {} // role not found nothing to do
                                     }
                                 }
                             }
-                        } 
-                    } 
+                        }
+                    }
                 }
-            },
+            }
             Err(_e) => {
                 return Err(Status::unauthenticated("Unable to parse cert."));
             }
@@ -303,7 +310,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Server::builder()
         .tls_config(tls)?
-        .add_service(ProcessApiServiceServer::with_interceptor(service, auth_interceptor)) // .add_service(MyServiceServer::with_interceptor(MyServiceImpl::default(), auth_interceptor))
+        .add_service(ProcessApiServiceServer::with_interceptor(
+            service,
+            auth_interceptor,
+        ))
         .serve(addr)
         .await?;
 

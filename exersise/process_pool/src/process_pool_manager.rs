@@ -22,7 +22,13 @@ impl ProcessPoolManager {
         }
     }
 
-    pub fn start_process(&mut self, command_line: &str, cpu_limit: Option<u32>, memory_limit: Option<u64>, io_limit: Option<u64>) -> Result<(u64)> {
+    pub fn start_process(
+        &mut self,
+        command_line: &str,
+        cpu_limit: Option<u32>,
+        memory_limit: Option<u64>,
+        io_limit: Option<u64>,
+    ) -> Result<(u64)> {
         let worker = Worker::new();
         let process_id = worker.get_id();
         self.pool.insert(process_id, Box::new(worker));
@@ -32,7 +38,6 @@ impl ProcessPoolManager {
     }
 
     pub fn stop_process(&mut self, process_id: u64) -> Result<bool> {
-        
         if self.pool.contains_key(&process_id) {
             let mut worker = self.pool.get_mut(&process_id).unwrap();
             match worker.stop() {

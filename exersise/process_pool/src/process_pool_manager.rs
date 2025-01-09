@@ -41,7 +41,9 @@ impl ProcessPoolManager {
                     let did_stop = worker.get_status() == WorkerStatus::Stopped;
 
                     // Remove the worker from the pool
-                    self.pool.remove(&process_id);
+                    if did_stop {
+                        self.pool.remove(&process_id);
+                    }
 
                     Ok(did_stop)
                 }

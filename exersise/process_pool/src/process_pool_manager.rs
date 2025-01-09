@@ -53,7 +53,6 @@ impl ProcessPoolManager {
         }
     }
 
-    // This needs to return a result if the process is not in the pool
     pub fn query_process_status(&self, process_id: u64) -> Result<WorkerStatus> {
         if self.pool.contains_key(&process_id) {
             let worker = &self.pool[&process_id];

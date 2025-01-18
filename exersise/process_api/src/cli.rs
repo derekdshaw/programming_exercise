@@ -14,7 +14,7 @@ pub mod process_api_service {
 }
 
 fn get_arg_matches() -> clap::ArgMatches {
-    let matches: clap::ArgMatches = ClapCommand::new("excersise_cli")
+    let matches: clap::ArgMatches = ClapCommand::new("teleport_cli")
         .version("1.0")
         .author("Author Name <derekdshaw@protonmail.com>")
         .about("Connects to a gRPC to execute a set of commands")

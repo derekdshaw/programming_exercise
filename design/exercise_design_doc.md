@@ -2,8 +2,7 @@
 
 ## 1 Introduction
 
-This design document will outline the design for a response to this
-programming challenge. [Design Challenge Windows](https://github.com/gravitational/careers/blob/main/challenges/systems/challenge-1-windows.md)
+This design document will outline the design an interview programming challenge.
 The intent of which is to create a library that delivers process execution and monitoring, along with a gRPC server and cli client for
 exercising the server which makes use of the library. The client and server need to support TLSm authentication along with
 streaming output support for running processes. 

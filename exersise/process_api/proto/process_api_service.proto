@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package process_api_service;
+
+import "google/protobuf/empty.proto";
+
+message StartCommand {
+  string command = 1;
+  optional uint32 cpu_limit = 2;
+  optional uint64 memory_limit = 3;
+  optional uint64 io_limit = 4;
+}
+
+message StartedProcess {
+  ProcessId process_id = 1;
+}
+
+message StoppedProcess {
+  bool process_stopped = 1;
+}
+
+message OutputStreamResponse {
+  string stdout = 1;
+}
+
+message ProcessId {
+  uint64 id = 1;
+}
+
+message ProcessList {
+  repeated uint64 processes = 1;
+}
+
+message ProcessStatus {
+  string status = 1;
+}
+
+service ProcessApiService {
+  rpc Start (StartCommand) returns (StartedProcess);
+  rpc Stop (ProcessId) returns (StoppedProcess);
+  rpc List (google.protobuf.Empty) returns (ProcessList);
+  rpc Status(ProcessId) returns (ProcessStatus);
+  rpc Output (ProcessId) returns (stream OutputStreamResponse);
+}

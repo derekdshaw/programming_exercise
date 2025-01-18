@@ -1,0 +1,31 @@
+[package]
+name = "process_api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.95"
+tonic = { version = "0.12.3", features = ["tls"] }
+prost = "0.13.4"
+tokio = { version = "1.42.0", features = ["full"] } 
+tokio-stream = "0.1.17"
+tokio-openssl = "0.6.5"
+openssl = { version = "0.10.68" }
+clap = "4.5.23"
+x509-parser = "0.16.0"
+process_pool = { path = "../process_pool" }
+
+
+[dev-dependencies]
+tonic = { version = "0.12.3", features = ["transport"] }
+
+[build-dependencies]
+tonic-build = "0.12.3"
+
+[[bin]]
+name = "process_api_server"
+path = "src/server.rs"
+
+[[bin]]
+name = "process_cli"
+path = "src/cli.rs"

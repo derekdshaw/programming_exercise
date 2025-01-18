@@ -1,0 +1,14 @@
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+subjectAltName = @alt_names
+certificatePolicies = @policies
+
+[alt_names]
+DNS.1 = localhost
+
+[policies]
+policyIdentifier = 1.2.3.4.5.6.7.8.1
+userNotice.1 = @role
+
+[role]
+explicitText = "Role: Reader"
